@@ -1,0 +1,94 @@
+<!doctype html> <html lang=en> <head> <meta charset=utf-8> <meta content="width=device-width,initial-scale=1" name=viewport> <meta content=#333333 name=theme-color> <base href=/ > <link href=style.css rel=stylesheet> <link href=manifest.json rel=manifest crossorigin=use-credentials> <link href=favicon.png rel=icon type=image/png> <link href=client/client-45f8eeec.css rel=stylesheet> <title>markmap docs</title><meta content="The documentation of markmap packages." name=Description><script async src="https://www.googletagmanager.com/gtag/js?id=UA-150941866-2"></script><script async src="//s7.addthis.com/js/300/addthis_widget.js#pubid=ra-5e8a94cfe37ab8bf"></script> <link href=/client/client.d8340e1b.js rel=modulepreload as=script crossorigin=use-credentials><link href=/client/client-45f8eeec.css rel=preload as=style><link href=/client/docs.bfad6b1a.js rel=modulepreload as=script crossorigin=use-credentials><link href=/client/client.40902db2.js rel=modulepreload as=script crossorigin=use-credentials><link href=/client/markmap.4f9f066d.js rel=modulepreload as=script crossorigin=use-credentials><link href=/client/footer.9c897835.js rel=modulepreload as=script crossorigin=use-credentials><link href=/client/inject_styles.5607aec6.js rel=modulepreload as=script crossorigin=use-credentials></head> <body> <div id=sapper> <nav><ul class=flex><li><a href=.>home</a><li><a href=repl>try it out</a><li><a href=docs aria-current=page>docs</a></li> <li class=flex-1></li> <li class="hidden items-center md:flex"></li> <li><a href=https://github.com/gera2ld/markmap rel="noreferrer noopener" target=_blank>GitHub</a></ul></nav> <main class="flex md:fs"> <div class="flex-1 lg:pr-12 markdown min-w-0 overflow-auto p-4"><p>This project is heavily inspired by <a href=https://github.com/dundalek/markmap>dundalek's markmap</a>.</p> <h2 id=introduction>Introduction</h2> <h3 id=what-is-markmap>What is markmap?</h3> <p>Markmap is a combination of markdown and mindmap. It parses markdown content and extract its intrinsic hierarchical structure and renders an interactive mindmap, aka markmap.</p> <p>The easiest way to use it is to load your markdown content to the <a href=/repl>try it out</a> 👉 page and see your markmap on the right.</p> <p>You can also try it in:</p> <ul> <li><a href="https://marketplace.visualstudio.com/items?itemName=gera2ld.markmap-vscode">VSCode</a> 🚀</li> <li>command-line: see <a href=#markmap-cli>markmap-cli</a> 👇</li> <li>Vim / Neovim: see <a href=#coc-markmap>coc-markmap</a> 👇</li> </ul> <h2 id=projects>Projects</h2> <h3 id=markmap-lib>markmap-lib</h3> <p><img alt=NPM src=https://img.shields.io/npm/v/markmap-lib.svg></p> <p>Transform Markdown to data used by markmap.</p> <h4 id=installation>Installation</h4> <pre><code class=language-sh>$ yarn add markmap-lib
+</code></pre> <h4 id=usage>Usage</h4> <p>Parse markdown and create a node tree, return the root node and a <code>features</code> object containing the active features during parsing.</p> <p>Transform Markdown to markmap data:</p> <pre><code class=language-js>import { Transformer } from 'markmap-lib';
+
+const transformer = new Transformer();
+
+// 1. transform markdown
+const { root, features } = transformer.transform(markdown);
+
+// 2. get assets
+// either get assets required by used features
+const { styles, scripts } = transformer.getUsedAssets(features);
+// or get all possible assets that could be used later
+const { styles, scripts } = transformer.getAssets(features);
+</code></pre> <p>Now we have the data for rendering. See <a href=#markmap-view>markmap-view</a> 👇 for how to use them.</p> <h3 id=markmap-view>markmap-view</h3> <p><img alt=NPM src=https://img.shields.io/npm/v/markmap-view.svg></p> <p>Render a markmap from transformed data.</p> <h4 id=installation-1>Installation</h4> <pre><code class=language-sh>$ yarn add markmap-view
+</code></pre> <h4 id=usage-1>Usage</h4> <p>Create an SVG element with explicit width and height:</p> <pre><code class=language-html>&lt;script src="https://cdn.jsdelivr.net/npm/d3@6">&lt;/script>
+&lt;script src="https://cdn.jsdelivr.net/npm/markmap-view">&lt;/script>
+
+&lt;svg id="markmap" style="width: 800px; height: 800px">&lt;/svg>
+</code></pre> <p>We got <code>{ root }</code> from transforming, and possible extraneous assets <code>{ styles, scripts }</code>.</p> <p>Now we can render a markmap to the SVG element:</p> <pre><code class=language-js>// load with &lt;script>
+const { markmap } = window;
+// or with ESM
+import * as markmap from 'markmap-view';
+
+const { Markmap, loadCSS, loadJS } = markmap;
+
+// 1. load assets
+if (styles) loadCSS(styles);
+if (scripts) loadJS(scripts, { getMarkmap: () => markmap });
+
+// 2. create markmap
+// `options` is optional, i.e. `undefined` can be passed here
+Markmap.create('#markmap', options, root);
+</code></pre> <p>The first argument of <code>Markmap.create</code> can also be an actual SVG element, for example:</p> <pre><code class=language-js>const svgEl = document.querySelector('#markmap');
+Markmap.create(svgEl, options, data);
+</code></pre> <h3 id=markmap-cli>markmap-cli</h3> <p><img alt=NPM src=https://img.shields.io/npm/v/markmap-cli.svg></p> <p>Use markmap command-line in a local terminal.</p> <h4 id=usage-2>Usage</h4> <pre><code class=language-sh>$ npx markmap-cli markmap.md
+</code></pre> <p>You can also install it globally:</p> <pre><code class=language-sh>$ yarn global add markmap-cli
+$ markmap markmap.md
+</code></pre> <p>There is a watch mode so that you could edit the Markdown file and get updates on the fly:</p> <pre><code class=language-sh>$ markmap -w markmap.md
+</code></pre> <h3 id=coc-markmap>coc-markmap</h3> <p><img alt=NPM src=https://img.shields.io/npm/v/coc-markmap.svg></p> <h4 id=installation-2>Installation</h4> <p>Make sure <a href=https://github.com/neoclide/coc.nvim>coc.nvim</a> is started.</p> <p>Then install with the Vim command:</p> <pre><code>:CocInstall coc-markmap
+</code></pre> <h4 id=usage-3>Usage</h4> <p>Open a Markdown file in Vim / Neovim, and execute:</p> <pre><code class=language-viml>:CocCommand markmap.create
+</code></pre> <p>An HTML file with the same basename as the Markdown file will be created and opened in your default browser.</p> <p>Visualization of selected text is also supported.</p> <h2 id=migration-notes>Migration notes</h2> <h3 id=010x---011x>0.10.x -> 0.11.x</h3> <p>There is a transformer instance now:</p> <pre><code class=language-diff>- import { transform, getUsedAssets, getAssets, fillTemplate } from 'markmap-lib';
++ import { Transformer, fillTemplate } from 'markmap-lib';
+
++ const transformer = new Transformer();
+
+- const { root, features } = transform(markdown);
++ const { root, features } = transformer.transform(markdown);
+
+- const { styles, scripts } = getUsedAssets(features);
++ const { styles, scripts } = transformer.getUsedAssets(features);
+  // or
+- const { styles, scripts } = getAssets();
++ const { styles, scripts } = transformer.getAssets();
+</code></pre> <h3 id=09x---010x>0.9.x -> 0.10.x</h3> <p>The entrance has changed:</p> <pre><code class=language-diff>- import { transform, getUsedAssets, getAssets } from 'markmap-lib/dist/transform';
+- import { fillTemplate } from 'markmap-lib/dist/template';
++ import { transform, getUsedAssets, getAssets, fillTemplate } from 'markmap-lib';
+
+- import * as markmap from 'markmap-lib/dist/view';
+- import { Markmap, loadCSS, loadJS } from 'markmap-lib/dist/view';
++ import * as markmap from 'markmap-view';
++ import { Markmap, loadCSS, loadJS } from 'markmap-view';
+</code></pre> <h3 id=08x---09x>0.8.x -> 0.9.x</h3> <p>In 0.9.x the plugins at rendering time are removed in favor of the transforming plugins. As a result, the generated markmap can be loaded faster with less overhead and hopefully without flash of untranspiled code. The transforming plugins are enabled on demand, i.e. when the markdown content is detected to have the feature included.</p> <p>So the changes are:</p> <h4 id=transforming>Transforming</h4> <p>We get both the root node and a map of used features. Then we get the assets list for future usage.</p> <pre><code class=language-diff>- import { transform } from 'markmap-lib/dist/transform';
++ import { transform, getUsedAssets, getAssets } from 'markmap-lib/dist/transform';
+
+- const root = transform(markdown);
++ const { root, features } = transform(markdown);
+
++ const assets = getUsedAssets(features);
++ // or just get all possible assets if the content may change in the future
++ const assets = getAssets();
+</code></pre> <h4 id=filling-the-template>Filling the template</h4> <p>We need to inject the extraneous assets required by plugins to the output.</p> <pre><code class=language-diff>  import { fillTemplate } from 'markmap-lib/dist/template';
+
+- const html = fillTemplate(root);
++ const html = fillTemplate(root, assets);
+</code></pre> <h4 id=render>Render</h4> <p>We don't need to load the view plugins any more, but we'll have to include the assets if plugin features are used.</p> <pre><code class=language-diff>- import { Markmap, loadPlugins } from 'markmap-lib/dist/view';
++ import * as markmap from 'markmap-lib/dist/view';
++ import { Markmap, loadCSS, loadJS } from 'markmap-lib/dist/view';
+
++ const { styles, scripts } = assets;
++ if (styles) loadCSS(styles);
++ if (scripts) loadJS(scripts, { getMarkmap: () => markmap });
+
+- loadPlugins([
+-   'mathJax',
+-   'prism',
+- ])
+- .then(() => {
+    Markmap.create('#markmap', null, data);
+- });
+</code></pre> <p>Note that the scripts may want to access <code>markmap</code> module, so we should export a <code>getMarkmap</code> method to <code>loadScript</code>. However this can be omitted if your markmap library is loaded from CDN and can be accessed via <code>window.markmap</code>.</p> <pre><code class=language-diff>+ &lt;script src="https://cdn.jsdelivr.net/npm/markmap-lib/dist/browser/view.min.js">&lt;/script>
+</code></pre> <pre><code class=language-diff>  console.log(window.markmap); // -> the markmap object
+- if (scripts) loadJS(scripts, { getMarkmap: () => markmap });
++ if (scripts) loadJS(scripts);
+</code></pre> <footer>Designed with ♥ by <a href=https://github.com/gera2ld rel="noreferrer noopener" target=_blank>gera2ld</a></footer></div></main> <div class=toast-wrapper></div> </div> <script>__SAPPER__={baseUrl:"",preloaded:[void 0,{}]};if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js');(function(){try{eval("async function x(){}");var main="/client/client.d8340e1b.js"}catch(e){main="/client/legacy/client.ccfad051.js"};var s=document.createElement("script");try{new Function("if(0)import('')")();s.src=main;s.type="module";s.crossOrigin="use-credentials";}catch(e){s.src="/client/shimport@2.0.5.js";s.setAttribute("data-main",main);}document.head.appendChild(s);}());</script> 
