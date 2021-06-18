@@ -94,7 +94,8 @@ export class Markmap {
   constructor(svg: string | SVGElement | ID3SVGElement, opts?: IMarkmapOptions) {
     [
       'handleZoom',
-      'handleClick',
+      'handleCircleClick',
+      'handleDescriptionToggleClick',
     ].forEach(key => {
       this[key] = this[key].bind(this);
     });
@@ -127,6 +128,7 @@ export class Markmap {
 .${id} a:hover { color: #00a8ff; }
 .${id}-g > path { fill: none; }
 .${id}-g > g > circle { cursor: pointer; }
+.${id}-g > g > polygon { cursor: pointer; }
 .${id}-fo > div { display: inline-block; font: ${nodeFont}; white-space: nowrap; }
 .${id}-fo code { font-size: calc(1em - 2px); color: #555; background-color: #f0f0f0; border-radius: 2px; }
 .${id}-fo :not(pre) > code { padding: .2em .4em; }
@@ -134,6 +136,8 @@ export class Markmap {
 .${id}-fo em { font-style: italic; }
 .${id}-fo strong { font-weight: bolder; }
 .${id}-fo pre { margin: 0; padding: .2em .4em; }
+.${id}-fo > div > .title { padding: .2em; }
+.${id}-fo > div > .description { padding: 0 .2em; }
 ${extraStyle}
 `;
     return styleText;
@@ -149,11 +153,20 @@ ${extraStyle}
     this.g.attr('transform', transform);
   }
 
-  handleClick(e, d: IMarkmapFlexTreeItem): void {
+  handleCircleClick(e, d: IMarkmapFlexTreeItem): void {
     const { data } = d;
     data.p = {
       ...data.p,
       f: !data.p?.f,
+    };
+    this.renderData(d.data);
+  }
+
+  handleDescriptionToggleClick(e, d: IMarkmapFlexTreeItem): void {
+    const { data } = d;
+    data.p = {
+      ...data.p,
+      hideDescription: !data.p?.hideDescription,
     };
     this.renderData(d.data);
   }
@@ -190,10 +203,36 @@ ${this.getStyleContent()}
       item.c = item.c?.map(child => ({ ...child }));
       i += 1;
       const el = document.createElement('div');
-      el.innerHTML = item.v;
+
+      const nodeTitle = document.createElement('p');
+      nodeTitle.innerHTML = item.v;
+      nodeTitle.className = 'title';
+      el.append(nodeTitle);
+      // element needs to be appended to DOM for `getBoundingClientRect` to work
       container.append(el);
+      const titleRect = nodeTitle.getBoundingClientRect();
+
+      let descriptionRect: DOMRect;
+      if (item.description) {
+        const nodeDescription = document.createElement('p');
+        nodeDescription.innerHTML = item.description;
+        nodeDescription.className = 'description';
+        el.append(nodeDescription);
+        descriptionRect = nodeDescription.getBoundingClientRect();
+      }
+
       item.p = {
         ...item.p,
+        // multiple sizes to allow resizing on toggling of description
+        titleSize: [
+          Math.ceil(titleRect.width),
+          Math.max(Math.ceil(titleRect.height), nodeMinHeight),
+        ],
+        descriptionSize: [
+          Math.ceil(descriptionRect?.width || 0),
+          Math.max(Math.ceil(descriptionRect?.height || 0), nodeMinHeight),
+        ],
+        hideDescription: item.description ? false : true,
         // unique ID
         i,
         el,
@@ -204,9 +243,6 @@ ${this.getStyleContent()}
     const nodes = arrayFrom(container.childNodes) as HTMLElement[];
     this.viewHooks.transformHtml.call(this, nodes);
     walkTree(node, (item, next, parent) => {
-      const rect = item.p.el.getBoundingClientRect();
-      item.v = item.p.el.innerHTML;
-      item.p.s = [Math.ceil(rect.width), Math.max(Math.ceil(rect.height), nodeMinHeight)];
       // TODO keep keys for unchanged objects
       // unique key, should be based on content
       item.p.k = `${parent?.p?.i || ''}.${item.p.i}:${item.v}`;
@@ -229,23 +265,43 @@ ${this.getStyleContent()}
 
   renderData(originData?: INode): void {
     if (!this.state.data) return;
-    const { spacingHorizontal, paddingX, spacingVertical, autoFit, color } = this.options;
+
+    const {
+      spacingHorizontal,
+      paddingX,
+      spacingVertical,
+      autoFit,
+      color,
+    } = this.options;
     const { id } = this.state;
+
+    // Configure layout
     const layout = flextree()
       .children((d: INode) => !d.p?.f && d.c)
       .nodeSize((d: IMarkmapFlexTreeItem) => {
-        const [width, height] = d.data.p.s;
-        return [height, width + (width ? paddingX * 2 : 0) + spacingHorizontal];
+        const [titleWidth, titleHeight] = d.data.p.titleSize;
+        const [descriptionWidth, descriptionHeight] =
+          d.data.p.hideDescription ? [ 0, 0 ] : d.data.p.descriptionSize;
+
+        const height = titleHeight + descriptionHeight;
+        const width = Math.max(titleWidth, descriptionWidth);
+        return [
+          height,
+          width + (width ? paddingX * 2 : 0) + spacingHorizontal
+        ];
       })
       .spacing((a: IMarkmapFlexTreeItem, b: IMarkmapFlexTreeItem) => {
         return a.parent === b.parent ? spacingVertical : spacingVertical * 2;
       });
+
+    // Generate layout
     const tree = layout.hierarchy(this.state.data);
     layout(tree);
+
     adjustSpacing(tree, spacingHorizontal);
+
+    // Update drawing boundaries
     const descendants: IMarkmapFlexTreeItem[] = tree.descendants().reverse();
-    const links: IMarkmapLinkItem[] = tree.links();
-    const linkShape = d3.linkHorizontal();
     const minX = d3.min<any, number>(descendants, d => d.x - d.xSize / 2);
     const maxX = d3.max<any, number>(descendants, d => d.x + d.xSize / 2);
     const minY = d3.min<any, number>(descendants, d => d.y);
@@ -256,65 +312,97 @@ ${this.getStyleContent()}
       minY,
       maxY,
     });
-
     if (autoFit) this.fit();
 
+    // Work relative to this node. Can be root or a node which is to be unfolded.
     const origin = originData && descendants.find(item => item.data === originData) || tree;
     const x0 = origin.data.p.x0 ?? origin.x;
     const y0 = origin.data.p.y0 ?? origin.y;
 
-    // Update the nodes
-    const node = this.g.selectAll<SVGGElement, IMarkmapFlexTreeItem>(childSelector<SVGGElement>('g'))
+    /// Generate DOM nodes for each element
+    // Update the container nodes
+    const nodes = this
+      .g.selectAll<SVGGElement, IMarkmapFlexTreeItem>(childSelector<SVGGElement>('g'))
       .data(descendants, d => d.data.p.k);
-    const nodeEnter = node.enter().append('g')
-      .attr('transform', d => `translate(${y0 + origin.ySizeInner - d.ySizeInner},${x0 + origin.xSize / 2 - d.xSize})`);
 
-    const nodeExit = this.transition(node.exit<IMarkmapFlexTreeItem>());
-    nodeExit.select('rect').attr('width', 0).attr('x', d => d.ySizeInner);
-    nodeExit.select('foreignObject').style('opacity', 0);
-    nodeExit.attr('transform', d => `translate(${origin.y + origin.ySizeInner - d.ySizeInner},${origin.x + origin.xSize / 2 - d.xSize})`).remove();
+    const nodesEntering = nodes.enter().append('g')
+      .attr('transform',
+        d => `translate(${
+          y0 + origin.ySizeInner - d.ySizeInner},${
+          x0 + origin.xSize / 2 - d.xSize})`);
 
-    const nodeMerge = node.merge(nodeEnter);
-    this.transition(nodeMerge).attr('transform', d => `translate(${d.y},${d.x - d.xSize / 2})`);
+    const nodesExiting = this.transition(nodes.exit<IMarkmapFlexTreeItem>());
+    nodesExiting.select('rect').attr('width', 0).attr('x', d => d.ySizeInner);
+    nodesExiting.select('polygon').style('opacity', 0);
+    nodesExiting.select('foreignObject').style('opacity', 0);
+    nodesExiting
+      .attr('transform',
+        d => `translate(${
+          origin.y + origin.ySizeInner - d.ySizeInner},${
+          origin.x + origin.xSize / 2 - d.xSize})`)
+      .remove();
 
-    const rect = nodeMerge.selectAll<SVGRectElement, IMarkmapFlexTreeItem>(childSelector<SVGRectElement>('rect'))
+    const nodesOnScreen = nodes.merge(nodesEntering);
+    this.transition(nodesOnScreen).attr('transform', d => `translate(${d.y},${d.x - d.xSize / 2})`);
+
+    // Update lines under nodes
+    nodesOnScreen
+      .selectAll<SVGRectElement, IMarkmapFlexTreeItem>(childSelector<SVGRectElement>('rect'))
       .data(d => [d], d => d.data.p.k)
       .join(
         enter => {
-          return enter.append('rect')
+          const rect = enter.append('rect')
             .attr('x', d => d.ySizeInner)
             .attr('y', d => d.xSize - linkWidth(d) / 2)
             .attr('width', 0)
-            .attr('height', linkWidth);
+            .attr('height', linkWidth)
+            .style('opacity', 0);
+          this.transition(rect)
+            .attr('x', -1)
+            .attr('width', d => d.ySizeInner + 2)
+            .attr('fill', d => color(d.data))
+            .style('opacity', 1);
+          return enter;
         },
-        update => update,
+        update => {
+          this.transition(update)
+            .attr('y', d => d.xSize - linkWidth(d) / 2)
+            .attr('width', d => d.ySizeInner + 2);
+          return update;
+        },
         exit => exit.remove(),
       );
-    this.transition(rect)
-      .attr('x', -1)
-      .attr('width', d => d.ySizeInner + 2)
-      .attr('fill', d => color(d.data));
 
-    const circle = nodeMerge.selectAll<SVGCircleElement, IMarkmapFlexTreeItem>(childSelector<SVGCircleElement>('circle'))
+    // Update branch splits
+    nodesOnScreen
+      .selectAll<SVGCircleElement, IMarkmapFlexTreeItem>(childSelector<SVGCircleElement>('circle'))
       .data(d => (d.data.c ? [d] : []), d => d.data.p.k)
       .join(
         enter => {
-          return enter.append('circle')
+          const circle = enter.append('circle')
+            .attr('r', 0)
             .attr('stroke-width', '1.5')
             .attr('cx', d => d.ySizeInner)
             .attr('cy', d => d.xSize)
-            .attr('r', 0)
-            .on('click', this.handleClick);
+            .on('click', this.handleCircleClick);
+          this.transition(circle)
+            .attr('r', 6)
+            .attr('stroke', d => color(d.data))
+            .attr('fill', d => (d.data.p?.f && d.data.c ? color(d.data) : '#fff'));
+          return circle;
         },
-        update => update,
+        update => {
+          this.transition(update)
+            .attr('cx', d => d.ySizeInner)
+            .attr('cy', d => d.xSize);
+          return update;
+        },
         exit => exit.remove(),
       );
-    this.transition(circle)
-      .attr('r', 6)
-      .attr('stroke', d => color(d.data))
-      .attr('fill', d => (d.data.p?.f && d.data.c ? color(d.data) : '#fff'));
 
-    const foreignObject = nodeMerge.selectAll<SVGForeignObjectElement, IMarkmapFlexTreeItem>(childSelector<SVGForeignObjectElement>('foreignObject'))
+    // Update node content
+    const foreignObjects = nodesOnScreen
+      .selectAll<SVGForeignObjectElement, IMarkmapFlexTreeItem>(childSelector<SVGForeignObjectElement>('foreignObject'))
       .data(d => [d], d => d.data.p.k)
       .join(
         enter => {
@@ -339,11 +427,81 @@ ${this.getStyleContent()}
         exit => exit.remove(),
       )
       .attr('width', d => Math.max(0, d.ySizeInner - paddingX * 2));
-    this.transition(foreignObject)
+    this.transition(foreignObjects)
       .style('opacity', 1);
 
-    // Update the links
-    const path = this.g.selectAll<SVGPathElement, IMarkmapLinkItem>(childSelector<SVGPathElement>('path'))
+    // Update descriptions
+    // TODO: descriptions just disappear now when toggled. They need a transition.
+    foreignObjects
+      .selectAll<HTMLDivElement, IMarkmapFlexTreeItem>('DIV')
+      .selectAll<HTMLParagraphElement, IMarkmapFlexTreeItem>('.description')
+      .data(d => (d && !d.data.p.hideDescription ? [d] : []), d => d?.data.p.k)
+      .join(
+        enter => {
+          const description = enter
+            .append<HTMLParagraphElement>(d => {
+              const paragraph = document.createElement('p');
+              paragraph.className = 'description';
+              paragraph.innerHTML = d.data.description ?? '';
+              return paragraph;
+            })
+            .style('opacity', 0);
+          this.transition(description)
+            .style('opacity', 1);
+          return description;
+        },
+        update => update,
+        exit => exit.remove(),
+      );
+
+    // Update description toggles
+    nodesOnScreen
+      .selectAll<SVGRectElement, IMarkmapFlexTreeItem>(childSelector<SVGRectElement>('polygon'))
+      .data(d => (d && d.data.description ? [d] : []), d => d?.data.p.k)
+      .join(
+        enter => {
+                    const toggleIcon = enter.append('polygon')
+            .attr('points', d => {
+              const [
+                hidingDescriptionArrow,
+                showingDescriptionArrow,
+              ] = this.generateDescriptionToggles(d.data.p.titleSize[1]);
+
+              return d.data.p.hideDescription
+                ? hidingDescriptionArrow
+                : showingDescriptionArrow;
+            })
+            .attr('stroke', 'grey')
+            .attr('fill', 'transparent')
+            .attr('stroke-width', 1.5)
+            .style('opacity', 0)
+            .on('click', this.handleDescriptionToggleClick);
+          this.transition(toggleIcon)
+            .style('opacity', 1);
+          return enter;
+        },
+        update => {
+          this.transition(update)
+            .attr('points', d => {
+              const [
+                hidingDescriptionArrow,
+                showingDescriptionArrow,
+              ] = this.generateDescriptionToggles(d.data.p.titleSize[1]);
+
+              return d.data.p.hideDescription
+                ? hidingDescriptionArrow
+                : showingDescriptionArrow;
+            })
+          return update;
+        },
+        exit => exit.remove(),
+      );
+
+    // Update links between the circles and the lines under a node's text
+    const links: IMarkmapLinkItem[] = tree.links();
+    const linkShape = d3.linkHorizontal();
+    const path = this
+      .g.selectAll<SVGPathElement, IMarkmapLinkItem>(childSelector<SVGPathElement>('path'))
       .data(links, d => d.target.data.p.k)
       .join(
         enter => {
@@ -391,6 +549,24 @@ ${this.getStyleContent()}
   ): d3.Transition<T, U, P, Q> {
     const { duration } = this.options;
     return sel.transition().duration(duration);
+  }
+
+  // Calculates coordinates for drawing svg polygon arrows.
+  generateDescriptionToggles(titleHeight: number): [string, string]
+  {
+    const halfSideLength = 3;
+    titleHeight = 0.5 * titleHeight;
+
+    const hidingDescriptionArrow = `\
+0 ${titleHeight - halfSideLength} \
+${halfSideLength * 2} ${titleHeight} \
+0 ${titleHeight + halfSideLength}`;
+    const showingDescriptionArrow = `\
+0 ${titleHeight - halfSideLength} \
+${halfSideLength * 2} ${titleHeight - halfSideLength} \
+${halfSideLength} ${titleHeight + halfSideLength}`;
+
+    return [hidingDescriptionArrow, showingDescriptionArrow];
   }
 
   /**
